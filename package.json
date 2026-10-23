@@ -1,0 +1,16 @@
+{
+  "name": "stremio-malayalam-auto-addon",
+  "version": "1.0.0",
+  "description": "Zero-maintenance Malayalam Stremio addon with automated catalog updates, CAM/HD badges, and TorBox streams.",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "sharp": "^0.33.2",
+    "axios": "^1.6.8",
+    "cors": "^2.8.5"
+  }
+}
