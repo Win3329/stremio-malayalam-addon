@@ -145,14 +145,13 @@ app.use('/catalog/movie/:id', async (req, res) => {
         ? `https://image.tmdb.org/t/p/w500${item.poster_path}` 
         : '';
 
-      return {
-        id: `tmdb:${item.id}`,
-        type: 'movie',
-        name: item.title,
-        releaseInfo: releaseYear,
-        poster: `${HOST}/poster?quality=${encodeURIComponent(quality)}&originalPoster=${encodeURIComponent(rawPoster)}`
-      };
-    });
+     return {
+  id: `tmdb:${item.id}`,
+  type: 'movie',
+  name: item.title,
+  releaseInfo: releaseYear,
+  poster: rawPoster
+};
 
     return res.json({ metas: formattedMetas });
   } catch (err) {
