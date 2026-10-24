@@ -15,7 +15,7 @@ app.use((req, res, next) => {
 });
 
 const PORT = process.env.PORT || 7000;
-const HOST = process.env.ADDON_HOST || `http://localhost:${PORT}`;
+const HOST = process.env.RENDER_EXTERNAL_URL || process.env.ADDON_HOST || `http://localhost:${PORT}`;
 
 const TMDB_KEY = '7b3df6ca1409f8b05ce8f12f6568becc';
 
