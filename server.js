@@ -1,6 +1,5 @@
 const express = require('express');
 const cors = require('cors');
-const sharp = require('sharp');
 const axios = require('axios');
 
 const app = express();
@@ -24,7 +23,7 @@ const manifest = {
   id: 'org.malayalam.multisource.v1',
   version: '1.0.0',
   name: 'Malayalam Direct MultiStream',
-  description: 'Unlimited Malayalam movies with dynamic CAM/HD badges and free direct streams.',
+  description: 'Unlimited Malayalam movies with clean posters and free direct streams.',
   resources: ['catalog', 'meta', 'stream'],
   types: ['movie'],
   catalogs: [
@@ -37,7 +36,7 @@ const manifest = {
     {
       type: 'movie',
       id: 'malayalam_popular',
-      name: 'Popular Malayalam Movies',
+      name: 'Popular Malayalam Movies (2020+ Rated)',
       extra: [{ name: 'skip' }]
     },
     {
@@ -48,53 +47,6 @@ const manifest = {
     }
   ]
 };
-
-// --- DYNAMIC POSTER BADGE ROUTE ---
-app.get('/poster', async (req, res) => {
-  const { quality, originalPoster } = req.query;
-
-  try {
-    let imageBuffer;
-    if (originalPoster && originalPoster.startsWith('http')) {
-      const resp = await axios.get(originalPoster, { 
-        responseType: 'arraybuffer',
-        timeout: 3000 
-      });
-      imageBuffer = Buffer.from(resp.data);
-    } else {
-      imageBuffer = await sharp({
-        create: { width: 300, height: 450, channels: 3, background: { r: 35, g: 35, b: 35 } }
-      }).png().toBuffer();
-    }
-
-    const badgeText = quality ? quality.toUpperCase() : 'HD MALAYALAM';
-    const isCam = badgeText === 'CAM';
-
-    const badgeSvg = `
-      <svg width="300" height="450">
-        <rect x="8" y="8" width="${isCam ? 60 : 115}" height="24" rx="3" ry="3" fill="#e50914" />
-        <text x="${isCam ? 38 : 65}" y="24" font-family="sans-serif" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">
-          ${badgeText}
-        </text>
-      </svg>
-    `;
-
-    const processedImage = await sharp(imageBuffer)
-      .resize(300, 450, { fit: 'cover' })
-      .composite([{ input: Buffer.from(badgeSvg), top: 0, left: 0 }])
-      .jpeg()
-      .toBuffer();
-
-    res.setHeader('Content-Type', 'image/jpeg');
-    res.setHeader('Cache-Control', 'public, max-age=86400');
-    return res.send(processedImage);
-  } catch (err) {
-    if (originalPoster && originalPoster.startsWith('http')) {
-      return res.redirect(originalPoster);
-    }
-    return res.status(404).send('Poster error');
-  }
-});
 
 // --- MANIFEST ENDPOINT ---
 app.get('/manifest.json', (req, res) => {
@@ -117,41 +69,36 @@ app.use('/catalog/movie/:id', async (req, res) => {
     let url = '';
 
     if (fullPath.includes('classics')) {
+      // Classics: older Malayalam movies sorted by popularity
       url = `https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_KEY}&with_original_language=ml&primary_release_date.lte=2012-12-31&sort_by=popularity.desc&page=${page}`;
     } else if (fullPath.includes('popular')) {
-      url = `https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_KEY}&with_original_language=ml&sort_by=popularity.desc&page=${page}`;
+      // Popular Tab: 2020 or later, sorted by highest rating first
+      url = `https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_KEY}&with_original_language=ml&primary_release_date.gte=2020-01-01&sort_by=vote_average.desc&vote_count.gte=10&page=${page}`;
     } else {
-      url = `https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_KEY}&with_original_language=ml&sort_by=primary_release_date.desc&vote_count.gte=1&page=${page}`;
+      // Recently Added: 2020 or later, newest first
+      url = `https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_KEY}&with_original_language=ml&primary_release_date.gte=2020-01-01&sort_by=primary_release_date.desc&page=${page}`;
     }
 
     const response = await axios.get(url, { timeout: 6000 });
     const results = response.data.results || [];
 
-    const now = new Date();
-
     const formattedMetas = results.map(item => {
       const releaseDate = item.release_date ? new Date(item.release_date) : null;
       const releaseYear = releaseDate ? releaseDate.getFullYear().toString() : '2026';
       
-      let quality = 'HD Malayalam';
-      if (releaseDate) {
-        const diffDays = Math.floor((now - releaseDate) / (1000 * 60 * 60 * 24));
-        if (diffDays >= 0 && diffDays <= 45) {
-          quality = 'CAM';
-        }
-      }
-
+      // Clean poster URL directly from TMDB without badges
       const rawPoster = item.poster_path 
         ? `https://image.tmdb.org/t/p/w500${item.poster_path}` 
         : '';
 
-     return {
-  id: `tmdb:${item.id}`,
-  type: 'movie',
-  name: item.title,
-  releaseInfo: releaseYear,
-  poster: rawPoster
-};
+      return {
+        id: `tmdb:${item.id}`,
+        type: 'movie',
+        name: item.title,
+        releaseInfo: releaseYear,
+        poster: rawPoster
+      };
+    });
 
     return res.json({ metas: formattedMetas });
   } catch (err) {
