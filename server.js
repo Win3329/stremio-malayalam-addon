@@ -21,9 +21,9 @@ const TMDB_KEY = '7b3df6ca1409f8b05ce8f12f6568becc';
 // --- STREMIO MANIFEST ---
 const manifest = {
   id: 'org.malayalam.multisource.v1',
-  version: '1.0.0',
+  version: '1.1.0',
   name: 'Malayalam Direct MultiStream',
-  description: 'Unlimited Malayalam movies with clean posters and free direct streams.',
+  description: 'Unlimited Malayalam movies with ratings, clean posters, and 11Tamil/HDHub streams.',
   resources: ['catalog', 'meta', 'stream'],
   types: ['movie'],
   catalogs: [
@@ -64,19 +64,18 @@ app.use('/catalog/movie/:id', async (req, res) => {
   }
 
   const page = Math.floor(skip / 20) + 1;
+  const today = new Date().toISOString().split('T')[0]; // Current date cap to avoid future 2027 movies
 
   try {
     let url = '';
 
     if (fullPath.includes('classics')) {
-      // Classics: older Malayalam movies sorted by popularity
       url = `https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_KEY}&with_original_language=ml&primary_release_date.lte=2012-12-31&sort_by=popularity.desc&page=${page}`;
     } else if (fullPath.includes('popular')) {
-      // Popular Tab: 2020 or later, sorted by highest rating first
-      url = `https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_KEY}&with_original_language=ml&primary_release_date.gte=2020-01-01&sort_by=vote_average.desc&vote_count.gte=10&page=${page}`;
+      url = `https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_KEY}&with_original_language=ml&primary_release_date.gte=2020-01-01&primary_release_date.lte=${today}&sort_by=vote_average.desc&vote_count.gte=10&page=${page}`;
     } else {
-      // Recently Added: 2020 or later, newest first
-      url = `https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_KEY}&with_original_language=ml&primary_release_date.gte=2020-01-01&sort_by=primary_release_date.desc&page=${page}`;
+      // Recently Added: Capped at today's date to filter out 2027 unreleased announcements
+      url = `https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_KEY}&with_original_language=ml&primary_release_date.gte=2020-01-01&primary_release_date.lte=${today}&sort_by=primary_release_date.desc&page=${page}`;
     }
 
     const response = await axios.get(url, { timeout: 6000 });
@@ -86,7 +85,6 @@ app.use('/catalog/movie/:id', async (req, res) => {
       const releaseDate = item.release_date ? new Date(item.release_date) : null;
       const releaseYear = releaseDate ? releaseDate.getFullYear().toString() : '2026';
       
-      // Clean poster URL directly from TMDB without badges
       const rawPoster = item.poster_path 
         ? `https://image.tmdb.org/t/p/w500${item.poster_path}` 
         : '';
@@ -107,14 +105,19 @@ app.use('/catalog/movie/:id', async (req, res) => {
   }
 });
 
-// --- META HANDLER ---
+// --- META HANDLER (Includes Rating & Cast) ---
 app.use('/meta/movie/:id', async (req, res) => {
   const rawId = req.params.id || '';
   const tmdbId = rawId.replace('.json', '').replace('tmdb:', '');
 
   try {
-    const tmdbRes = await axios.get(`https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${TMDB_KEY}`);
+    const tmdbRes = await axios.get(`https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${TMDB_KEY}&append_to_response=credits`);
     const movie = tmdbRes.data;
+
+    // Extract top 5 cast members' names
+    const castMembers = movie.credits && movie.credits.cast 
+      ? movie.credits.cast.slice(0, 5).map(actor => actor.name) 
+      : [];
 
     res.json({
       meta: {
@@ -124,7 +127,9 @@ app.use('/meta/movie/:id', async (req, res) => {
         poster: movie.poster_path ? `https://image.tmdb.org/t/p/w500${movie.poster_path}` : '',
         background: movie.backdrop_path ? `https://image.tmdb.org/t/p/w1280${movie.backdrop_path}` : '',
         description: movie.overview,
-        releaseInfo: movie.release_date ? movie.release_date.split('-')[0] : ''
+        releaseInfo: movie.release_date ? movie.release_date.split('-')[0] : '',
+        imdbRating: movie.vote_average ? movie.vote_average.toFixed(1) : undefined,
+        cast: castMembers
       }
     });
   } catch (err) {
@@ -139,11 +144,12 @@ app.use('/meta/movie/:id', async (req, res) => {
   }
 });
 
-// --- SAFE MULTI-SOURCE STREAM HANDLER ---
+// --- STREAM HANDLER (Includes HDHub & 11Tamil / 1TamilMV Search) ---
 app.use('/stream/movie/:id', async (req, res) => {
   const rawId = req.params.id || '';
   const movieId = rawId.replace('.json', '');
   const streams = [];
+  let movieTitle = movieId;
 
   try {
     let imdbId = movieId;
@@ -151,8 +157,13 @@ app.use('/stream/movie/:id', async (req, res) => {
     if (movieId.startsWith('tmdb:')) {
       const tmdbId = movieId.replace('tmdb:', '');
       const tmdbRes = await axios.get(`https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${TMDB_KEY}`);
-      if (tmdbRes.data && tmdbRes.data.imdb_id) {
-        imdbId = tmdbRes.data.imdb_id;
+      if (tmdbRes.data) {
+        if (tmdbRes.data.imdb_id) {
+          imdbId = tmdbRes.data.imdb_id;
+        }
+        if (tmdbRes.data.title) {
+          movieTitle = tmdbRes.data.title;
+        }
       }
     }
 
@@ -171,14 +182,21 @@ app.use('/stream/movie/:id', async (req, res) => {
     console.error('Stream Handler Error:', err.message);
   }
 
-  // Fallback direct web search stream if no direct streams found
+  // Fallback / Direct Search Links for HDHub4u and 11Tamil (1TamilMV)
   if (streams.length === 0) {
     streams.push({
       name: 'HDHub Search',
       title: 'Search Title on HDHub4u',
-      externalUrl: `https://hdhub4u.ms/?s=${encodeURIComponent(movieId)}`
+      externalUrl: `https://hdhub4u.ms/?s=${encodeURIComponent(movieTitle)}`
     });
   }
+
+  // Always add an option to check and search directly on 11Tamil / 1TamilMV
+  streams.push({
+    name: '11Tamil / TamilMV',
+    title: `Check Availability on 11Tamil (1TamilMV)`,
+    externalUrl: `https://www.1tamilmv.com.in/?s=${encodeURIComponent(movieTitle)}`
+  });
 
   res.json({ streams });
 });
